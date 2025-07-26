@@ -906,48 +906,37 @@ namespace CoopKBnM
             }
         }
 
-        [HarmonyPatch(typeof(BraveOptionsMenuItem), nameof(BraveOptionsMenuItem.Update))]
-        public class BraveOptionsMenuItemUpdatePatchClass
+        [HarmonyPatch(typeof(GameOptions), nameof(GameOptions.CurrentPreferredFullscreenMode), MethodType.Setter)]
+        public class SetCurrentPreferredFullscreenModePatchClass
         {
             [HarmonyILManipulator]
-            public static void BraveOptionsMenuItemUpdatePatch(ILContext ctx)
+            public static void SetCurrentPreferredFullscreenModePatch(ILContext ctx)
             {
                 ILCursor crs = new ILCursor(ctx);
 
-                if (crs.TryGotoNext(MoveType.After,
-                    x => x.MatchCallvirt<GameOptions>("get_CurrentPreferredFullscreenMode")
+                if (crs.TryGotoNext(MoveType.Before,
+                    x => x.MatchStfld<GameOptions>("m_preferredFullscreenMode")
                     ))
                 {
-                    crs.EmitCall<BraveOptionsMenuItemUpdatePatchClass>(nameof(BraveOptionsMenuItemUpdatePatchClass.BraveOptionsMenuItemUpdatePatchCall));
+                    crs.EmitCall<SetCurrentPreferredFullscreenModePatchClass>(nameof(SetCurrentPreferredFullscreenModePatchClass.SetCurrentPreferredFullscreenModePatchCall));
                 }
             }
 
-            private static GameOptions.PreferredFullscreenMode BraveOptionsMenuItemUpdatePatchCall(GameOptions.PreferredFullscreenMode orig)
+            private static GameOptions.PreferredFullscreenMode SetCurrentPreferredFullscreenModePatchCall(GameOptions.PreferredFullscreenMode orig)
             {
-                return 0;
+                if (orig == GameOptions.PreferredFullscreenMode.FULLSCREEN)
+                    return GameOptions.PreferredFullscreenMode.BORDERLESS;
+                return orig;
             }
         }
 
-        [HarmonyPatch(typeof(GameOptions), nameof(GameOptions.CurrentVisualPreset), MethodType.Setter)]
-        public class Set_CurrentVisualPresetPatchClass
+        [HarmonyPatch(typeof(GameManager), nameof(GameManager.DoSetResolution))]
+        public class DoSetResolutionPatchClass
         {
-            [HarmonyILManipulator]
-            public static void Set_CurrentVisualPresetPatch(ILContext ctx)
+            [HarmonyPrefix]
+            public static bool DoSetResolutionPrefix()
             {
-                ILCursor crs = new ILCursor(ctx);
-
-                if (((Func<bool>)(() =>
-                    crs.TryGotoNext(MoveType.After,
-                    x => x.MatchLdfld<GameOptions>("m_visualPresetMode")
-                    ))).TheNthTime(3))
-                {
-                    crs.EmitCall<Set_CurrentVisualPresetPatchClass>(nameof(Set_CurrentVisualPresetPatchClass.Set_CurrentVisualPresetPatchCall));
-                }
-            }
-
-            private static GameOptions.VisualPresetMode Set_CurrentVisualPresetPatchCall(GameOptions.VisualPresetMode orig)
-            {
-                return (GameOptions.VisualPresetMode)1;
+                return false;
             }
         }
 
