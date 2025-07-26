@@ -358,8 +358,6 @@ namespace CoopKBnM
                 Cursor.lockState = CursorLockMode.None;
                 Cursor.visible = true;
             }
-
-
         }
 
         private static void RegisterDevices()
