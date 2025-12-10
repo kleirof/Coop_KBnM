@@ -450,7 +450,7 @@ namespace CoopKBnM
             [HarmonyPrefix]
             public static bool Get_MousePositionPrefix(ref Vector3 __result)
             {
-                __result = RawInputHandler.firstMousePosition;
+                __result = RawInputHandler.FirstMousePosition;
                 return false;
             }
         }
@@ -567,7 +567,7 @@ namespace CoopKBnM
                                     color = new Color(0.402f, 0.111f, 0.32f);
                             }
 
-                            Vector2 mousePosition = RawInputHandler.firstMousePosition;
+                            Vector2 mousePosition = RawInputHandler.FirstMousePosition;
                             mousePosition.y = (float)Screen.height - mousePosition.y;
                             Vector2 vector = new Vector2((float)texture2D.width, (float)texture2D.height) * (float)((!(Pixelator.Instance != null)) ? 3 : ((int)Pixelator.Instance.ScaleTileScale)) * scale;
                             Rect screenRect = new Rect(mousePosition.x + 0.5f - vector.x / 2f, mousePosition.y + 0.5f - vector.y / 2f, vector.x, vector.y);
@@ -603,13 +603,13 @@ namespace CoopKBnM
                                 }
                                 Vector2 mousePosition1;
                                 if (!OptionsManager.restrictMouseInputPort)
-                                    mousePosition1 = RawInputHandler.firstMousePosition;
+                                    mousePosition1 = RawInputHandler.FirstMousePosition;
                                 else
                                 {
                                     if (OptionsManager.currentPlayerOneMousePort == 1)
-                                        mousePosition1 = RawInputHandler.secondMousePosition;
+                                        mousePosition1 = RawInputHandler.SecondMousePosition;
                                     else
-                                        mousePosition1 = RawInputHandler.firstMousePosition;
+                                        mousePosition1 = RawInputHandler.FirstMousePosition;
                                 }
                                 mousePosition1.y = (float)Screen.height - mousePosition1.y;
                                 Vector2 vector1 = new Vector2((float)texture2D.width, (float)texture2D.height) * (float)((!(Pixelator.Instance != null)) ? 3 : ((int)Pixelator.Instance.ScaleTileScale)) * scale;
@@ -645,13 +645,13 @@ namespace CoopKBnM
                                 }
                                 Vector2 mousePosition2;
                                 if (!OptionsManager.restrictMouseInputPort)
-                                    mousePosition2 = RawInputHandler.firstMousePosition;
+                                    mousePosition2 = RawInputHandler.FirstMousePosition;
                                 else
                                 {
                                     if (OptionsManager.currentPlayerOneMousePort == 0)
-                                        mousePosition2 = RawInputHandler.secondMousePosition;
+                                        mousePosition2 = RawInputHandler.SecondMousePosition;
                                     else
-                                        mousePosition2 = RawInputHandler.firstMousePosition;
+                                        mousePosition2 = RawInputHandler.FirstMousePosition;
                                 }
                                 mousePosition2.y = (float)Screen.height - mousePosition2.y;
                                 Vector2 vector2 = new Vector2((float)texture2D.width, (float)texture2D.height) * (float)((!(Pixelator.Instance != null)) ? 3 : ((int)Pixelator.Instance.ScaleTileScale)) * scale;
@@ -700,7 +700,7 @@ namespace CoopKBnM
                                 if (GameManager.Instance.CurrentGameType == GameManager.GameType.COOP_2_PLAYER && !BraveInput.GetInstanceForPlayer(0).IsKeyboardAndMouse(false) && BraveInput.GetInstanceForPlayer(1).IsKeyboardAndMouse(false))
                                     color = new Color(0.402f, 0.111f, 0.32f);
                             }
-                            Vector2 mousePosition = RawInputHandler.firstMousePosition;
+                            Vector2 mousePosition = RawInputHandler.FirstMousePosition;
                             mousePosition.y = (float)Screen.height - mousePosition.y;
                             Vector2 vector = new Vector2((float)texture2D.width, (float)texture2D.height) * (float)((!(Pixelator.Instance != null)) ? 3 : ((int)Pixelator.Instance.ScaleTileScale)) * scale;
                             Rect screenRect = new Rect(mousePosition.x + 0.5f - vector.x / 2f, mousePosition.y + 0.5f - vector.y / 2f, vector.x, vector.y);
@@ -748,13 +748,13 @@ namespace CoopKBnM
                                 }
                                 Vector2 mousePosition;
                                 if (!OptionsManager.restrictMouseInputPort)
-                                    mousePosition = RawInputHandler.firstMousePosition;
+                                    mousePosition = RawInputHandler.FirstMousePosition;
                                 else
                                 {
                                     if (OptionsManager.isPrimaryPlayerOnMainCamera)
-                                        mousePosition = OptionsManager.currentPlayerOneMousePort == 0 ? RawInputHandler.firstMousePosition : RawInputHandler.secondMousePosition;
+                                        mousePosition = OptionsManager.currentPlayerOneMousePort == 0 ? RawInputHandler.FirstMousePosition : RawInputHandler.SecondMousePosition;
                                     else
-                                        mousePosition = OptionsManager.currentPlayerOneMousePort != 0 ? RawInputHandler.firstMousePosition : RawInputHandler.secondMousePosition;
+                                        mousePosition = OptionsManager.currentPlayerOneMousePort != 0 ? RawInputHandler.FirstMousePosition : RawInputHandler.SecondMousePosition;
                                 }
 
                                 mousePosition.y = (float)Screen.height - mousePosition.y;
@@ -810,16 +810,16 @@ namespace CoopKBnM
                     if (self.IsPrimaryPlayer)
                     {
                         if (OptionsManager.currentPlayerOneMousePort == 0)
-                            return RawInputHandler.firstMousePosition.x;
+                            return RawInputHandler.FirstMousePosition.x;
                         else
-                            return RawInputHandler.secondMousePosition.x;
+                            return RawInputHandler.SecondMousePosition.x;
                     }
                     else
                     {
                         if (OptionsManager.currentPlayerOneMousePort == 0)
-                            return RawInputHandler.secondMousePosition.x;
+                            return RawInputHandler.SecondMousePosition.x;
                         else
-                            return RawInputHandler.firstMousePosition.x;
+                            return RawInputHandler.FirstMousePosition.x;
                     }
                 }
                 else
@@ -833,16 +833,16 @@ namespace CoopKBnM
                     if (self.IsPrimaryPlayer)
                     {
                         if (OptionsManager.currentPlayerOneMousePort == 0)
-                            return RawInputHandler.firstMousePosition.y;
+                            return RawInputHandler.FirstMousePosition.y;
                         else
-                            return RawInputHandler.secondMousePosition.y;
+                            return RawInputHandler.SecondMousePosition.y;
                     }
                     else
                     {
                         if (OptionsManager.currentPlayerOneMousePort == 0)
-                            return RawInputHandler.secondMousePosition.y;
+                            return RawInputHandler.SecondMousePosition.y;
                         else
-                            return RawInputHandler.firstMousePosition.y;
+                            return RawInputHandler.FirstMousePosition.y;
                     }
                 }
                 else

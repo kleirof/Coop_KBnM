@@ -70,7 +70,7 @@ namespace CoopKBnM
         public static extern bool RegisterRawInputDevices(RAWINPUTDEVICE[] pRawInputDevice, uint uiNumDevices, uint cbSize);
 
         [DllImport("user32.dll")]
-        private static extern int GetRawInputData(IntPtr hRawInput, uint uiCommand, IntPtr pData, ref uint pDataSize, uint cbSizeHeader);
+        private static unsafe extern uint GetRawInputData(IntPtr hRawInput, uint uiCommand, void* pData, ref uint pcbSize, uint cbSizeHeader);
 
         [DllImport("user32.dll")]
         private static extern bool SetCursorPos(int X, int Y);
@@ -153,8 +153,8 @@ namespace CoopKBnM
         public static HashSet<KeyCode> secondKeyboardPressedKeys = new HashSet<KeyCode>();
         public static HashSet<KeyCode> secondKeyboardCurrentFrameKeysUp = new HashSet<KeyCode>();
 
-        public static Vector2 firstMousePosition;
-        public static Vector2 secondMousePosition;
+        private static Vector2 firstMousePosition;
+        private static Vector2 secondMousePosition;
 
         private static IntPtr firstKeyboardDevice = IntPtr.Zero;
         private static IntPtr firstMouseDevice = IntPtr.Zero;
@@ -177,6 +177,9 @@ namespace CoopKBnM
 
         public static float playerOneMouseSensitivityMultiplier = 1f;
         public static float playerTwoMouseSensitivityMultiplier = 1f;
+
+        private static bool firstMousePositionDirty = true;
+        private static bool secondMousePositionDirty = true;
 
         private static Camera MainCamera
         {
@@ -257,7 +260,9 @@ namespace CoopKBnM
             ETGModMainBehaviour.WaitForGameManagerStart(GMStart);
 
             firstMousePosition = new Vector2(Screen.width / 2, Screen.height / 2);
+            firstMousePositionDirty = true;
             secondMousePosition = new Vector2(Screen.width / 2, Screen.height / 2);
+            secondMousePositionDirty = true;
         }
 
         private IEnumerator InitializeRawInput()
@@ -483,290 +488,393 @@ namespace CoopKBnM
             }
         }
 
-        private static void ProcessRawInput(IntPtr lParam)
+        public static Vector2 FirstMousePosition
         {
-            uint dwSize = 0;
-            if (GetRawInputData(lParam, 0x10000003, IntPtr.Zero, ref dwSize, (uint)Marshal.SizeOf(typeof(RAWINPUTHEADER))) == 0)
+            get
             {
-                //Console.WriteLine($"Input data size: {dwSize - Marshal.SizeOf(typeof(RAWINPUTHEADER))}");
+                if (!firstMousePositionDirty)
+                {
+                    return firstMousePosition;
+                }
+
+                if (MainCamera != null)
+                {
+                    float cameraXMin = (Screen.width - MainCamera.pixelWidth) / 2;
+                    float cameraXMax = (Screen.width + MainCamera.pixelWidth) / 2;
+                    float cameraYMin = (Screen.height - MainCamera.pixelHeight) / 2;
+                    float cameraYMax = (Screen.height + MainCamera.pixelHeight) / 2;
+
+                    firstMousePosition.x = Mathf.Clamp(firstMousePosition.x, cameraXMin, cameraXMax);
+                    firstMousePosition.y = Mathf.Clamp(firstMousePosition.y, cameraYMin, cameraYMax);
+                }
+                else
+                {
+                    firstMousePosition.x = Mathf.Clamp(firstMousePosition.x, 0, Screen.width);
+                    firstMousePosition.y = Mathf.Clamp(firstMousePosition.y, 0, Screen.height);
+                }
+
+                firstMousePositionDirty = false;
+                return firstMousePosition;
             }
-            else
+        }
+
+        public static Vector2 SecondMousePosition
+        {
+            get
+            {
+                if (!secondMousePositionDirty)
+                {
+                    return secondMousePosition;
+                }
+
+                if (MainCamera != null)
+                {
+                    float cameraXMin = (Screen.width - MainCamera.pixelWidth) / 2;
+                    float cameraXMax = (Screen.width + MainCamera.pixelWidth) / 2;
+                    float cameraYMin = (Screen.height - MainCamera.pixelHeight) / 2;
+                    float cameraYMax = (Screen.height + MainCamera.pixelHeight) / 2;
+
+                    secondMousePosition.x = Mathf.Clamp(secondMousePosition.x, cameraXMin, cameraXMax);
+                    secondMousePosition.y = Mathf.Clamp(secondMousePosition.y, cameraYMin, cameraYMax);
+                }
+                else
+                {
+                    secondMousePosition.x = Mathf.Clamp(secondMousePosition.x, 0, Screen.width);
+                    secondMousePosition.y = Mathf.Clamp(secondMousePosition.y, 0, Screen.height);
+                }
+
+                secondMousePositionDirty = false;
+                return secondMousePosition;
+            }
+        }
+
+        private static unsafe void ProcessRawInput(IntPtr lParam)
+        {
+            const int MAX_BUFFER_SIZE = 64;
+            const uint RID_INPUT = 0x10000003;
+            const long MAX_MOUSE_DELTA = 10000;
+
+            uint dwSize = 0;
+            if (GetRawInputData(lParam, RID_INPUT, null, ref dwSize, (uint)sizeof(RAWINPUTHEADER)) != 0)
             {
                 Console.WriteLine("Failed to get input data size.");
                 return;
             }
 
-            if (dwSize > 64)
+            if (dwSize > MAX_BUFFER_SIZE || dwSize < sizeof(RAWINPUTHEADER))
             {
+                Console.WriteLine($"Invalid input data size: {dwSize}");
                 return;
             }
 
-            if (GetRawInputData(lParam, 0x10000003, rawBuffer, ref dwSize, (uint)Marshal.SizeOf(typeof(RAWINPUTHEADER))) != dwSize)
+            byte* buffer = stackalloc byte[MAX_BUFFER_SIZE];
+
+            uint actualSize = dwSize;
+            if (GetRawInputData(lParam, RID_INPUT, buffer, ref actualSize, (uint)sizeof(RAWINPUTHEADER)) != actualSize)
             {
                 Console.WriteLine("GetRawInputData does not return correct size.");
                 return;
             }
 
-            RAWINPUTHEADER header = (RAWINPUTHEADER)Marshal.PtrToStructure(rawBuffer, typeof(RAWINPUTHEADER));
-
-            if (header.dwType == 0)
+            if (actualSize > MAX_BUFFER_SIZE || actualSize < sizeof(RAWINPUTHEADER))
             {
-                IntPtr mouseDataPtr = new IntPtr(rawBuffer.ToInt64() + Marshal.SizeOf(typeof(RAWINPUTHEADER)));
-                RAWMOUSE mouse = (RAWMOUSE)Marshal.PtrToStructure(mouseDataPtr, typeof(RAWMOUSE));
+                Console.WriteLine($"Actual data size out of bounds: {actualSize}");
+                return;
+            }
 
-                if (firstMouseDevice == IntPtr.Zero)
+            try
+            {
+                RAWINPUTHEADER* header = (RAWINPUTHEADER*)buffer;
+
+                if (header->dwType != 0 && header->dwType != 1)
                 {
-                    firstMouseDevice = header.hDevice;
+                    Console.WriteLine($"Unknown input type: {header->dwType}");
+                    return;
                 }
 
-                if (mouse.lLastX != 0 || mouse.lLastY != 0)
+                ulong dataStart = (ulong)buffer + (ulong)sizeof(RAWINPUTHEADER);
+                ulong dataEnd = (ulong)buffer + actualSize;
+
+                if (dataStart >= dataEnd)
                 {
-                    if (header.hDevice == firstMouseDevice)
+                    Console.WriteLine("Invalid data offset.");
+                    return;
+                }
+
+                if (header->dwType == 0)
+                {
+                    if (dataEnd - dataStart < (ulong)sizeof(RAWMOUSE))
                     {
-                        firstMouseStatus.rawX = mouse.lLastX;
-                        firstMouseStatus.rawY = mouse.lLastY;
-
-                        firstMousePosition.x += firstMouseStatus.rawX * playerOneMouseSensitivity * playerOneMouseSensitivityMultiplier;
-                        firstMousePosition.y -= firstMouseStatus.rawY * playerOneMouseSensitivity * playerOneMouseSensitivityMultiplier;
-
-                        if (MainCamera != null)
-                            firstMousePosition = new Vector2(Mathf.Clamp(firstMousePosition.x, (Screen.width - MainCamera.pixelWidth) / 2, (Screen.width + MainCamera.pixelWidth) / 2), Mathf.Clamp(firstMousePosition.y, (Screen.height - MainCamera.pixelHeight) / 2, (Screen.height + MainCamera.pixelHeight) / 2));
-                        else
-                            firstMousePosition = new Vector2(Mathf.Clamp(firstMousePosition.x, 0, Screen.width), Mathf.Clamp(firstMousePosition.y, 0, Screen.height));
+                        Console.WriteLine("Mouse data too small.");
+                        return;
                     }
-                    else
+
+                    RAWMOUSE* mouse = (RAWMOUSE*)dataStart;
+
+                    if (mouse->lLastX > MAX_MOUSE_DELTA || mouse->lLastX < -MAX_MOUSE_DELTA ||
+                        mouse->lLastY > MAX_MOUSE_DELTA || mouse->lLastY < -MAX_MOUSE_DELTA)
                     {
-                        secondMouseStatus.rawX = mouse.lLastX;
-                        secondMouseStatus.rawY = mouse.lLastY;
-
-                        if (ShowTwoMouseCursor)
+                        Console.WriteLine($"Mouse delta out of range: X={mouse->lLastX}, Y={mouse->lLastY}");
+                    }
+                    else if (mouse->lLastX != 0 || mouse->lLastY != 0)
+                    {
+                        if (firstMouseDevice == IntPtr.Zero)
                         {
-                            secondMousePosition.x += secondMouseStatus.rawX * playerTwoMouseSensitivity * playerTwoMouseSensitivityMultiplier;
-                            secondMousePosition.y -= secondMouseStatus.rawY * playerTwoMouseSensitivity * playerTwoMouseSensitivityMultiplier;
-
-                            if (MainCamera != null)
-                                secondMousePosition = new Vector2(Mathf.Clamp(secondMousePosition.x, (Screen.width - MainCamera.pixelWidth) / 2, (Screen.width + MainCamera.pixelWidth) / 2), Mathf.Clamp(secondMousePosition.y, (Screen.height - MainCamera.pixelHeight) / 2, (Screen.height + MainCamera.pixelHeight) / 2));
-                            else
-                                secondMousePosition = new Vector2(Mathf.Clamp(secondMousePosition.x, 0, Screen.width), Mathf.Clamp(secondMousePosition.y, 0, Screen.height));
+                            firstMouseDevice = header->hDevice;
                         }
-                        else
-                        {
-                            firstMousePosition.x += secondMouseStatus.rawX * playerTwoMouseSensitivity * playerOneMouseSensitivityMultiplier;
-                            firstMousePosition.y -= secondMouseStatus.rawY * playerTwoMouseSensitivity * playerOneMouseSensitivityMultiplier;
 
-                            if (MainCamera != null)
+                        if (header->hDevice == firstMouseDevice)
+                        {
+                            firstMouseStatus.rawX = mouse->lLastX;
+                            firstMouseStatus.rawY = mouse->lLastY;
+
+                            firstMousePosition.x += firstMouseStatus.rawX * playerOneMouseSensitivity * playerOneMouseSensitivityMultiplier;
+                            firstMousePosition.y -= firstMouseStatus.rawY * playerOneMouseSensitivity * playerOneMouseSensitivityMultiplier;
+
+                            firstMousePositionDirty = true;
+                            /*if (MainCamera != null)
                                 firstMousePosition = new Vector2(Mathf.Clamp(firstMousePosition.x, (Screen.width - MainCamera.pixelWidth) / 2, (Screen.width + MainCamera.pixelWidth) / 2), Mathf.Clamp(firstMousePosition.y, (Screen.height - MainCamera.pixelHeight) / 2, (Screen.height + MainCamera.pixelHeight) / 2));
                             else
-                                firstMousePosition = new Vector2(Mathf.Clamp(firstMousePosition.x, 0, Screen.width), Mathf.Clamp(firstMousePosition.y, 0, Screen.height));
+                                firstMousePosition = new Vector2(Mathf.Clamp(firstMousePosition.x, 0, Screen.width), Mathf.Clamp(firstMousePosition.y, 0, Screen.height));*/
+                        }
+                        else
+                        {
+                            secondMouseStatus.rawX = mouse->lLastX;
+                            secondMouseStatus.rawY = mouse->lLastY;
+
+                            if (ShowTwoMouseCursor)
+                            {
+                                secondMousePosition.x += secondMouseStatus.rawX * playerTwoMouseSensitivity * playerTwoMouseSensitivityMultiplier;
+                                secondMousePosition.y -= secondMouseStatus.rawY * playerTwoMouseSensitivity * playerTwoMouseSensitivityMultiplier;
+
+                                secondMousePositionDirty = true;
+/*                                if (MainCamera != null)
+                                    secondMousePosition = new Vector2(Mathf.Clamp(secondMousePosition.x, (Screen.width - MainCamera.pixelWidth) / 2, (Screen.width + MainCamera.pixelWidth) / 2), Mathf.Clamp(secondMousePosition.y, (Screen.height - MainCamera.pixelHeight) / 2, (Screen.height + MainCamera.pixelHeight) / 2));
+                                else
+                                    secondMousePosition = new Vector2(Mathf.Clamp(secondMousePosition.x, 0, Screen.width), Mathf.Clamp(secondMousePosition.y, 0, Screen.height));*/
+                            }
+                            else
+                            {
+                                firstMousePosition.x += secondMouseStatus.rawX * playerTwoMouseSensitivity * playerOneMouseSensitivityMultiplier;
+                                firstMousePosition.y -= secondMouseStatus.rawY * playerTwoMouseSensitivity * playerOneMouseSensitivityMultiplier;
+
+                                firstMousePositionDirty = true;
+/*                                if (MainCamera != null)
+                                    firstMousePosition = new Vector2(Mathf.Clamp(firstMousePosition.x, (Screen.width - MainCamera.pixelWidth) / 2, (Screen.width + MainCamera.pixelWidth) / 2), Mathf.Clamp(firstMousePosition.y, (Screen.height - MainCamera.pixelHeight) / 2, (Screen.height + MainCamera.pixelHeight) / 2));
+                                else
+                                    firstMousePosition = new Vector2(Mathf.Clamp(firstMousePosition.x, 0, Screen.width), Mathf.Clamp(firstMousePosition.y, 0, Screen.height));*/
+                            }
                         }
                     }
-                    //Console.WriteLine($"Mouse Device ID: {header.hDevice} | Mouse moved: X={mouse.lLastX}, Y={mouse.lLastY}");
-                }
 
-                if ((mouse.usButtonFlags & RI_MOUSE_LEFT_BUTTON_DOWN) != 0) // 左键按下
-                {
-                    if (header.hDevice == firstMouseDevice)
-                    {
-                        firstMouseStatus.leftButtonDown = true;
-                        firstMouseStatus.leftButton = true;
-                    }
-                    else
-                    {
-                        secondMouseStatus.leftButtonDown = true;
-                        secondMouseStatus.leftButton = true;
-                    }
-                    //Console.WriteLine($"Mouse Device ID: {header.hDevice} | Left button down");
-                }
-                if ((mouse.usButtonFlags & RI_MOUSE_LEFT_BUTTON_UP) != 0) // 左键松开
-                {
-                    if (header.hDevice == firstMouseDevice)
-                    {
-                        firstMouseStatus.leftButtonUp = true;
-                        firstMouseStatus.leftButton = false;
-                    }
-                    else
-                    {
-                        secondMouseStatus.leftButtonUp = true;
-                        secondMouseStatus.leftButton = false;
-                    }
-                    //Console.WriteLine($"Mouse Device ID: {header.hDevice} | Left button up");
-                }
-                if ((mouse.usButtonFlags & RI_MOUSE_RIGHT_BUTTON_DOWN) != 0) // 右键按下
-                {
-                    if (header.hDevice == firstMouseDevice)
-                    {
-                        firstMouseStatus.rightButtonDown = true;
-                        firstMouseStatus.rightButton = true;
-                    }
-                    else
-                    {
-                        secondMouseStatus.rightButtonDown = true;
-                        secondMouseStatus.rightButton = true;
-                    }
-                    //Console.WriteLine($"Mouse Device ID: {header.hDevice} | Right button down");
-                }
-                if ((mouse.usButtonFlags & RI_MOUSE_RIGHT_BUTTON_UP) != 0) // 右键松开
-                {
-                    if (header.hDevice == firstMouseDevice)
-                    {
-                        firstMouseStatus.rightButtonUp = true;
-                        firstMouseStatus.rightButton = false;
-                    }
-                    else
-                    {
-                        secondMouseStatus.rightButtonUp = true;
-                        secondMouseStatus.rightButton = false;
-                    }
-                    //Console.WriteLine($"Mouse Device ID: {header.hDevice} | Right button up");
-                }
-                if ((mouse.usButtonFlags & RI_MOUSE_MIDDLE_BUTTON_DOWN) != 0) // 中键按下
-                {
-                    if (header.hDevice == firstMouseDevice)
-                    {
-                        firstMouseStatus.middleButtonDown = true;
-                        firstMouseStatus.middleButton = true;
-                    }
-                    else
-                    {
-                        secondMouseStatus.middleButtonDown = true;
-                        secondMouseStatus.middleButton = true;
-                    }
-                    //Console.WriteLine($"Mouse Device ID: {header.hDevice} | Middle button down");
-                }
-                if ((mouse.usButtonFlags & RI_MOUSE_MIDDLE_BUTTON_UP) != 0) // 中键松开
-                {
-                    if (header.hDevice == firstMouseDevice)
-                    {
-                        firstMouseStatus.middleButtonUp = true;
-                        firstMouseStatus.middleButton = false;
-                    }
-                    else
-                    {
-                        secondMouseStatus.middleButtonUp = true;
-                        secondMouseStatus.middleButton = false;
-                    }
-                    //Console.WriteLine($"Mouse Device ID: {header.hDevice} | Middle button up");
-                }
-                if ((mouse.usButtonFlags & RI_MOUSE_BUTTON_4_DOWN) != 0) // x1键按下
-                {
-                    if (header.hDevice == firstMouseDevice)
-                    {
-                        firstMouseStatus.x1ButtonDown = true;
-                        firstMouseStatus.x1Button = true;
-                    }
-                    else
-                    {
-                        secondMouseStatus.x1ButtonDown = true;
-                        secondMouseStatus.x1Button = true;
-                    }
-                    //Console.WriteLine($"Mouse Device ID: {header.hDevice} | Middle button down");
-                }
-                if ((mouse.usButtonFlags & RI_MOUSE_BUTTON_4_UP) != 0) // x1键松开
-                {
-                    if (header.hDevice == firstMouseDevice)
-                    {
-                        firstMouseStatus.x1ButtonUp = true;
-                        firstMouseStatus.x1Button = false;
-                    }
-                    else
-                    {
-                        secondMouseStatus.x1ButtonUp = true;
-                        secondMouseStatus.x1Button = false;
-                    }
-                    //Console.WriteLine($"Mouse Device ID: {header.hDevice} | Middle button up");
-                }
-                if ((mouse.usButtonFlags & RI_MOUSE_BUTTON_5_DOWN) != 0) // x2键按下
-                {
-                    if (header.hDevice == firstMouseDevice)
-                    {
-                        firstMouseStatus.x2ButtonDown = true;
-                        firstMouseStatus.x2Button = true;
-                    }
-                    else
-                    {
-                        secondMouseStatus.x2ButtonDown = true;
-                        secondMouseStatus.x2Button = true;
-                    }
-                    //Console.WriteLine($"Mouse Device ID: {header.hDevice} | Middle button down");
-                }
-                if ((mouse.usButtonFlags & RI_MOUSE_BUTTON_5_UP) != 0) // x2键松开
-                {
-                    if (header.hDevice == firstMouseDevice)
-                    {
-                        firstMouseStatus.x2ButtonUp = true;
-                        firstMouseStatus.x2Button = false;
-                    }
-                    else
-                    {
-                        secondMouseStatus.x2ButtonUp = true;
-                        secondMouseStatus.x2Button = false;
-                    }
-                    //Console.WriteLine($"Mouse Device ID: {header.hDevice} | Middle button up");
-                }
+                    const ushort ALL_MOUSE_FLAGS = (ushort)(RI_MOUSE_LEFT_BUTTON_DOWN | RI_MOUSE_LEFT_BUTTON_UP |
+                                                 RI_MOUSE_RIGHT_BUTTON_DOWN | RI_MOUSE_RIGHT_BUTTON_UP |
+                                                 RI_MOUSE_MIDDLE_BUTTON_DOWN | RI_MOUSE_MIDDLE_BUTTON_UP |
+                                                 RI_MOUSE_BUTTON_4_DOWN | RI_MOUSE_BUTTON_4_UP |
+                                                 RI_MOUSE_BUTTON_5_DOWN | RI_MOUSE_BUTTON_5_UP |
+                                                 RI_MOUSE_WHEEL);
 
-                if ((mouse.usButtonFlags & RI_MOUSE_WHEEL) != 0) // 垂直滚轮
-                {
-                    if (header.hDevice == firstMouseDevice)
+                    if ((mouse->usButtonFlags & ~ALL_MOUSE_FLAGS) != 0)
                     {
-                        firstMouseStatus.wheel = mouse.usButtonData;
+                        Console.WriteLine($"Invalid mouse button flags: 0x{mouse->usButtonFlags:X}");
+                        return;
+                    }
+
+                    if (header->hDevice == firstMouseDevice)
+                    {
+                        if ((mouse->usButtonFlags & RI_MOUSE_LEFT_BUTTON_DOWN) != 0)
+                        {
+                            firstMouseStatus.leftButtonDown = true;
+                            firstMouseStatus.leftButton = true;
+                        }
+                        if ((mouse->usButtonFlags & RI_MOUSE_LEFT_BUTTON_UP) != 0)
+                        {
+                            firstMouseStatus.leftButtonUp = true;
+                            firstMouseStatus.leftButton = false;
+                        }
+                        if ((mouse->usButtonFlags & RI_MOUSE_RIGHT_BUTTON_DOWN) != 0)
+                        {
+                            firstMouseStatus.rightButtonDown = true;
+                            firstMouseStatus.rightButton = true;
+                        }
+                        if ((mouse->usButtonFlags & RI_MOUSE_RIGHT_BUTTON_UP) != 0)
+                        {
+                            firstMouseStatus.rightButtonUp = true;
+                            firstMouseStatus.rightButton = false;
+                        }
+                        if ((mouse->usButtonFlags & RI_MOUSE_MIDDLE_BUTTON_DOWN) != 0)
+                        {
+                            firstMouseStatus.middleButtonDown = true;
+                            firstMouseStatus.middleButton = true;
+                        }
+                        if ((mouse->usButtonFlags & RI_MOUSE_MIDDLE_BUTTON_UP) != 0)
+                        {
+                            firstMouseStatus.middleButtonUp = true;
+                            firstMouseStatus.middleButton = false;
+                        }
+                        if ((mouse->usButtonFlags & RI_MOUSE_BUTTON_4_DOWN) != 0)
+                        {
+                            firstMouseStatus.x1ButtonDown = true;
+                            firstMouseStatus.x1Button = true;
+                        }
+                        if ((mouse->usButtonFlags & RI_MOUSE_BUTTON_4_UP) != 0)
+                        {
+                            firstMouseStatus.x1ButtonUp = true;
+                            firstMouseStatus.x1Button = false;
+                        }
+                        if ((mouse->usButtonFlags & RI_MOUSE_BUTTON_5_DOWN) != 0)
+                        {
+                            firstMouseStatus.x2ButtonDown = true;
+                            firstMouseStatus.x2Button = true;
+                        }
+                        if ((mouse->usButtonFlags & RI_MOUSE_BUTTON_5_UP) != 0)
+                        {
+                            firstMouseStatus.x2ButtonUp = true;
+                            firstMouseStatus.x2Button = false;
+                        }
+                        if ((mouse->usButtonFlags & RI_MOUSE_WHEEL) != 0)
+                        {
+                            if (mouse->usButtonData <= 0xFFF)
+                            {
+                                firstMouseStatus.wheel = (int)mouse->usButtonData;
+                            }
+                        }
                     }
                     else
                     {
-                        secondMouseStatus.wheel = mouse.usButtonData;
+                        if ((mouse->usButtonFlags & RI_MOUSE_LEFT_BUTTON_DOWN) != 0)
+                        {
+                            secondMouseStatus.leftButtonDown = true;
+                            secondMouseStatus.leftButton = true;
+                        }
+                        if ((mouse->usButtonFlags & RI_MOUSE_LEFT_BUTTON_UP) != 0)
+                        {
+                            secondMouseStatus.leftButtonUp = true;
+                            secondMouseStatus.leftButton = false;
+                        }
+                        if ((mouse->usButtonFlags & RI_MOUSE_RIGHT_BUTTON_DOWN) != 0)
+                        {
+                            secondMouseStatus.rightButtonDown = true;
+                            secondMouseStatus.rightButton = true;
+                        }
+                        if ((mouse->usButtonFlags & RI_MOUSE_RIGHT_BUTTON_UP) != 0)
+                        {
+                            secondMouseStatus.rightButtonUp = true;
+                            secondMouseStatus.rightButton = false;
+                        }
+                        if ((mouse->usButtonFlags & RI_MOUSE_MIDDLE_BUTTON_DOWN) != 0)
+                        {
+                            secondMouseStatus.middleButtonDown = true;
+                            secondMouseStatus.middleButton = true;
+                        }
+                        if ((mouse->usButtonFlags & RI_MOUSE_MIDDLE_BUTTON_UP) != 0)
+                        {
+                            secondMouseStatus.middleButtonUp = true;
+                            secondMouseStatus.middleButton = false;
+                        }
+                        if ((mouse->usButtonFlags & RI_MOUSE_BUTTON_4_DOWN) != 0)
+                        {
+                            secondMouseStatus.x1ButtonDown = true;
+                            secondMouseStatus.x1Button = true;
+                        }
+                        if ((mouse->usButtonFlags & RI_MOUSE_BUTTON_4_UP) != 0)
+                        {
+                            secondMouseStatus.x1ButtonUp = true;
+                            secondMouseStatus.x1Button = false;
+                        }
+                        if ((mouse->usButtonFlags & RI_MOUSE_BUTTON_5_DOWN) != 0)
+                        {
+                            secondMouseStatus.x2ButtonDown = true;
+                            secondMouseStatus.x2Button = true;
+                        }
+                        if ((mouse->usButtonFlags & RI_MOUSE_BUTTON_5_UP) != 0)
+                        {
+                            secondMouseStatus.x2ButtonUp = true;
+                            secondMouseStatus.x2Button = false;
+                        }
+                        if ((mouse->usButtonFlags & RI_MOUSE_WHEEL) != 0)
+                        {
+                            if (mouse->usButtonData <= 0xFFF)
+                            {
+                                secondMouseStatus.wheel = (int)mouse->usButtonData;
+                            }
+                        }
                     }
-                    //Console.WriteLine($"Mouse Device ID: {header.hDevice} | Vertical Wheel Scrolled: {mouse.usButtonData}");
+                }
+                else if (header->dwType == 1)
+                {
+                    if (dataEnd - dataStart < (ulong)sizeof(RAWKEYBOARD))
+                    {
+                        Console.WriteLine("Keyboard data too small.");
+                        return;
+                    }
+
+                    RAWKEYBOARD* keyboard = (RAWKEYBOARD*)dataStart;
+
+                    if (firstKeyboardDevice == IntPtr.Zero)
+                    {
+                        firstKeyboardDevice = header->hDevice;
+                    }
+
+                    if (keyboard->VKey > 255)
+                    {
+                        Console.WriteLine($"Invalid virtual key code: {keyboard->VKey}");
+                        return;
+                    }
+
+                    if (KeyCodeMaps.KeysToKeyCodeMap.TryGetValue((KeyCodeMaps.Keys)keyboard->VKey, out KeyCode keycode))
+                    {
+                        uint validFlags = 0x0001 | 0x0002 | 0x0004;
+                        if ((keyboard->Flags & ~validFlags) != 0)
+                        {
+                            Console.WriteLine($"Invalid keyboard flags: 0x{keyboard->Flags:X}");
+                            return;
+                        }
+
+                        if ((keyboard->Flags & 0x0001) == 0)
+                        {
+                            if (header->hDevice == firstKeyboardDevice)
+                            {
+                                if (!firstKeyboardPressedKeys.Contains(keycode))
+                                {
+                                    firstKeyboardCurrentFrameKeysDown.Add(keycode);
+                                    firstKeyboardPressedKeys.Add(keycode);
+                                }
+                            }
+                            else
+                            {
+                                if (!secondKeyboardPressedKeys.Contains(keycode))
+                                {
+                                    secondKeyboardCurrentFrameKeysDown.Add(keycode);
+                                    secondKeyboardPressedKeys.Add(keycode);
+                                }
+                            }
+                        }
+                        else
+                        {
+                            if (header->hDevice == firstKeyboardDevice)
+                            {
+                                firstKeyboardPressedKeys.Remove(keycode);
+                                firstKeyboardCurrentFrameKeysUp.Add(keycode);
+                            }
+                            else
+                            {
+                                secondKeyboardPressedKeys.Remove(keycode);
+                                secondKeyboardCurrentFrameKeysUp.Add(keycode);
+                            }
+                        }
+                    }
                 }
             }
-            else if (header.dwType == 1)
+            catch (AccessViolationException ex)
             {
-                IntPtr keyboardDataPtr = new IntPtr(rawBuffer.ToInt64() + Marshal.SizeOf(typeof(RAWINPUTHEADER)));
-                RAWKEYBOARD keyboard = (RAWKEYBOARD)Marshal.PtrToStructure(keyboardDataPtr, typeof(RAWKEYBOARD));
-
-                if (firstKeyboardDevice == IntPtr.Zero)
-                {
-                    firstKeyboardDevice = header.hDevice;
-                }
-
-
-                if (KeyCodeMaps.KeysToKeyCodeMap.TryGetValue((KeyCodeMaps.Keys)keyboard.VKey, out KeyCode keycode))
-                {
-                    if ((keyboard.Flags & 0x0001) == 0)
-                    {
-                        if (header.hDevice == firstKeyboardDevice)
-                        {
-                            if (!firstKeyboardPressedKeys.Contains(keycode))
-                            {
-                                //Console.WriteLine($"Key Down: {keyboard.VKey}, MakeCode: {keyboard.MakeCode}");
-                                firstKeyboardCurrentFrameKeysDown.Add(keycode);
-                                firstKeyboardPressedKeys.Add(keycode);
-                            }
-                        }
-                        else
-                        {
-                            if (!secondKeyboardPressedKeys.Contains(keycode))
-                            {
-                                //Console.WriteLine($"Key Down: {keyboard.VKey}, MakeCode: {keyboard.MakeCode}");
-                                secondKeyboardCurrentFrameKeysDown.Add(keycode);
-                                secondKeyboardPressedKeys.Add(keycode);
-                            }
-                        }
-                    }
-                    else if ((keyboard.Flags & 0x0001) == 1)
-                    {
-                        if (header.hDevice == firstKeyboardDevice)
-                        {
-                            //Console.WriteLine($"Key Up: {keyboard.VKey}, MakeCode: {keyboard.MakeCode}");
-                            firstKeyboardPressedKeys.Remove(keycode);
-                            firstKeyboardCurrentFrameKeysUp.Add(keycode);
-                        }
-                        else
-                        {
-                            //Console.WriteLine($"Key Up: {keyboard.VKey}, MakeCode: {keyboard.MakeCode}");
-                            secondKeyboardPressedKeys.Remove(keycode);
-                            secondKeyboardCurrentFrameKeysUp.Add(keycode);
-                        }
-                    }
-                }
+                Console.WriteLine($"Access violation in raw input processing: {ex.Message}");
+                return;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Unexpected error in raw input processing: {ex.Message}");
+                return;
             }
         }
 

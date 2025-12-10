@@ -13,7 +13,7 @@ namespace CoopKBnM
 	{
 		public const string GUID = "kleirof.etg.coopkbnm";
 		public const string NAME = "Coop KB&M";
-		public const string VERSION = "1.0.6";
+		public const string VERSION = "1.0.7";
 		public const string TEXT_COLOR = "#FFFFCC";
 
 		public static bool isCoopViewLoaded = false;
