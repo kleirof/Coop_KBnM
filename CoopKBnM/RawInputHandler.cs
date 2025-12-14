@@ -326,6 +326,7 @@ namespace CoopKBnM
             secondMouseStatus.rawX = 0;
             secondMouseStatus.rawY = 0;
 
+            bool windowsDown = Input.GetKeyDown(KeyCode.LeftWindows) || Input.GetKeyDown(KeyCode.RightWindows);
             if (!Application.isFocused)
             {
                 firstKeyboardPressedKeys.Clear();
@@ -348,14 +349,13 @@ namespace CoopKBnM
             }
             else
             {
-                if (Input.anyKeyDown)
+                if (Input.anyKeyDown && !windowsDown)
                     temporarilyEnableSystemMouse = false;
             }
 
-            if (Input.GetKeyDown(KeyCode.LeftWindows) || Input.GetKeyDown(KeyCode.RightWindows))
-            {
+            if (windowsDown)
                 temporarilyEnableSystemMouse = true;
-            }
+
             if (!temporarilyEnableSystemMouse && GameManager.HasInstance)
                 Cursor.lockState = CursorLockMode.Locked;
             else
@@ -481,6 +481,8 @@ namespace CoopKBnM
             {
                 case 101:
                     temporarilyEnableSystemMouse = true;
+                    Cursor.lockState = CursorLockMode.None;
+                    Cursor.visible = true;
                     break;
 
                 default:
